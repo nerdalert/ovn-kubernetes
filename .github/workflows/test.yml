@@ -7,10 +7,10 @@ on:
 
 env:
   GO_VERSION: 1.13.4
-  K8S_VERSION: v1.18.2
+  K8S_VERSION: v1.17.2
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
-
+  OVN_HYBRID_OVERLAY_ENABLE: true 
 jobs:
   build:
     name: Build
@@ -116,10 +116,6 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - shard-n
-          - shard-np
-          - shard-s
-          - shard-other
           - control-plane
         ha:
          - enabled: "true"
@@ -165,7 +161,6 @@ jobs:
       if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
-        rm -rf $GOPATH/src/k8s.io/kubernetes/
         git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
         pushd $GOPATH/src/k8s.io/kubernetes/
         make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
@@ -191,3 +186,4 @@ jobs:
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
+

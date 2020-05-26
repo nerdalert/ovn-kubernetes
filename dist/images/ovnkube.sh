@@ -288,8 +288,8 @@ get_ovn_db_vars() {
       ovn_nbdb_str=${ovn_nbdb_str}","
       ovn_sbdb_str=${ovn_sbdb_str}","
     fi
-    ovn_nbdb_str=${ovn_nbdb_str}${transport}://[${ovn_db_hosts[${i}]}]:${ovn_nb_port}
-    ovn_sbdb_str=${ovn_sbdb_str}${transport}://[${ovn_db_hosts[${i}]}]:${ovn_sb_port}
+    ovn_nbdb_str=${ovn_nbdb_str}${transport}://${ovn_db_hosts[${i}]}:${ovn_nb_port}
+    ovn_sbdb_str=${ovn_sbdb_str}${transport}://${ovn_db_hosts[${i}]}:${ovn_sb_port}
   done
   # OVN_NORTH and OVN_SOUTH override derived host
   ovn_nbdb=${OVN_NORTH:-$ovn_nbdb_str}
@@ -379,11 +379,8 @@ check_health() {
   "ovnnb_db" | "ovnsb_db")
     ctl_file=${OVN_RUNDIR}/${1}.ctl
     ;;
-  "ovn-northd" | "ovn-controller" | "ovn-nbctl")
+  "ovn-northd" | "ovn-controller" | "ovsdb-server" | "ovs-vswitchd" | "ovn-nbctl")
     ctl_file=${OVN_RUNDIR}/${1}.${2}.ctl
-    ;;
-  "ovsdb-server" | "ovs-vswitchd")
-    ctl_file=${OVS_RUNDIR}/${1}.${2}.ctl
     ;;
   *)
     echo "Unknown service ${1} specified. Exiting.. "
@@ -644,7 +641,7 @@ nb-ovsdb() {
     ovn-nbctl set-ssl ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert}
     echo "=============== nb-ovsdb ========== reconfigured for SSL"
   }
-  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:[${ovn_db_host}]
+  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:${ovn_db_host}
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
@@ -676,7 +673,7 @@ sb-ovsdb() {
     ovn-sbctl set-ssl ${ovn_sb_pk} ${ovn_sb_cert} ${ovn_ca_cert}
     echo "=============== sb-ovsdb ========== reconfigured for SSL"
   }
-  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:[${ovn_db_host}]
+  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:${ovn_db_host}
 
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
   set_ovnkube_db_ep ${ovn_db_host}
@@ -752,7 +749,7 @@ ovn-master() {
   wait_for_event ovs_ready
 
   hybrid_overlay_flags=
-  if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
+  if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
     if [[ -n "${ovn_hybrid_overlay_net_cidr}" ]]; then
       hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
@@ -858,12 +855,9 @@ ovn-node() {
   fi
 
   OVN_ENCAP_IP=""
-  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
-  if [[ $? == 0 ]]; then
-    ovn_encap_ip=$(echo ${ovn_encap_ip} | tr -d '\"')
-    if [[ "${ovn_encap_ip}" != "" ]]; then
-      OVN_ENCAP_IP="--encap-ip=${ovn_encap_ip}"
-    fi
+  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip | tr -d '\"')
+  if [[ $? == 0 && "${ovn_encap_ip}" != "" ]]; then
+    OVN_ENCAP_IP=$(echo --encap-ip=${ovn_encap_ip})
   fi
 
   local ovn_node_ssl_opts=""

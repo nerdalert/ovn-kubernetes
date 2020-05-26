@@ -374,8 +374,8 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		}
 		for _, flowmod := range strings.Split(kubectlOut, "\n") {
 			// filter out irrelevant lines from ofctl output
-			if strings.Contains(flowmod, "n_packets=") {
-				// verify no flowmod counters were hit in br-ext
+			if strings.Contains(flowmod, pingTarget) {
+				// verify no flowmod counters were hit in br-ext for the target
 				if !strings.Contains(flowmod, "n_packets=0") {
 					framework.Failf("Expected packets=0 but found the flow %s", flowmod)
 				}
@@ -473,8 +473,8 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 })
 
 
-// Verify pods in the namespace annotated with an external-gateway traverse the vxlan overlay and reach the
-// intended external gateway vtep. Then validate the rx counters on the vxlan interface mocking as a gateway
+// Verify pods in the namespace annotated with an external-gateway traverse the vxlan
+// overlay and reach the intended external gateway vtep and gateway end to end
 var _ = Describe("e2e external gateway validation", func() {
 	var haMode bool
 	vxlanPort := "4789"
@@ -495,32 +495,32 @@ var _ = Describe("e2e external gateway validation", func() {
 		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
 		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
 		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
-
+		// start the container that will act as an external gateway
 		_, err := runCommand("docker", "run", "-itd", "--privileged", "--name", gwContainerName, "centos")
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
-
+		// retrieve the container ip of the external gateway container
 		exVtepIP, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", gwContainerName)
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
 		// trim newline from the inspect output >:|
 		exVtepIP = strings.TrimSuffix(exVtepIP, "\n")
-		// Annotate the test namespace
+		framework.Logf("The external gateway IP is %s", exVtepIP)
+		// annotate the test namespace
 		annotationFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGW)
 		annotationVtepFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIP)
 		framework.Logf("Annotating the external gateway test namespace")
 		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationFlag)
 		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationVtepFlag)
-
-		// Attempt to retrieve the pod name that will source the tunnel test in non-HA mode
+		// attempt to retrieve the pod name that will source the tunnel test in non-HA mode
 		kubectlOut, err := framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorFlag)
 		if err != nil {
 			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
 		}
 		haMode = false
-		// Attempt to retrieve the pod name that will source the tunnel test in HA mode
+		// attempt to retrieve the pod name that will source the tunnel test in HA mode
 		if kubectlOut == "''" {
 			haMode = true
 			kubectlOut, err = framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorHaFlag)
@@ -534,7 +534,7 @@ var _ = Describe("e2e external gateway validation", func() {
 		// tear down the container simulating the gateway
 		_, err := runCommand("docker", "rm", "-f", gwContainerName)
 		if err != nil {
-			framework.Failf("failed to delete the gateway test container: %v", err)
+			framework.Failf("failed to delete the gateway test container %v", err)
 		}
 	})
 
@@ -547,18 +547,23 @@ var _ = Describe("e2e external gateway validation", func() {
 		}
 		cmdOut, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", ciWorkerNodeSrc)
 		if err != nil {
-			framework.Failf("failed to get the node ip address from node %s %v",ciWorkerNodeSrc , err)
+			framework.Failf("failed to get the node ip address from node %s %v", ciWorkerNodeSrc, err)
 		}
 		localVtepIP := strings.TrimSuffix(cmdOut, "\n")
 		framework.Logf("the pod side vtep node is %s and the ip %s", ciWorkerNodeSrc, localVtepIP)
 		// retrieve the pod cidr for the worker node
-		jsonFlag := "jsonpath='{.spec.podCIDRs[0]}'"
+		jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
 		kubectlOut, err := framework.RunKubectl("get", "node", ciWorkerNodeSrc, "-o", jsonFlag)
 		if err != nil {
 			framework.Failf("Error retrieving the pod cidr from %s %v", ciWorkerNodeSrc, err)
 		}
-		podCIDR := strings.Trim(kubectlOut, "'")
-		framework.Logf("the pod cidr for %s is %v", ciWorkerNodeSrc, podCIDR)
+		// clean up the string cidr stdout from the annotation "'{\"default\":\"10.244.x.0/24\"}'"
+		splitCIDR := strings.Split(kubectlOut, ":")
+		replaceCIDR := splitCIDR[1]
+		trimParenCIDR := strings.Replace(replaceCIDR, "\"", "", -1)
+		trimCharCIDR := strings.Replace(trimParenCIDR, "'", "", -1)
+		podCIDR := strings.Trim(trimCharCIDR, "}")
+		framework.Logf("the pod cidr for node %s is %s", ciWorkerNodeSrc, podCIDR)
 		// setup the container to act as an external gateway and vtep
 		_, err = runCommand("docker", "exec", gwContainerName, "ip", "link", "add", "vxlan0", "type", "vxlan", "dev",
 			"eth0", "id", "4097", "dstport", vxlanPort, "remote", localVtepIP)
@@ -577,10 +582,11 @@ var _ = Describe("e2e external gateway validation", func() {
 		if err != nil {
 			framework.Failf("failed to add the pod route on the test container: %v", err)
 		}
-
+		// give the container time to come up and stabilize
+		time.Sleep(time.Second * 30)
 		By(fmt.Sprintf("Creating a container on %s and testing end to end traffic to an external gateway", ciWorkerNodeSrc))
 		framework.ExpectNoError(
-			// generate traffic that will being encapsulated and sent to the external gateway. No response is expected.
-			checkConnectivityPingToHost(f, "ovn-worker", ciWorkerNodeSrc, extGW, ipv4PingCommand, 30))
+			// generate traffic that will being encapsulated and sent to the external gateway.
+			checkConnectivityPingToHost(f, ciWorkerNodeSrc, "external-gateway-e2e", extGW, ipv4PingCommand, 30))
 	})
 })

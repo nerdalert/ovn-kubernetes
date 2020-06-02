@@ -584,7 +584,7 @@ var _ = Describe("e2e external gateway validation", func() {
 		time.Sleep(time.Second * 30)
 		By(fmt.Sprintf("Creating a container on %s and testing end to end traffic to an external gateway", ciWorkerNodeSrc))
 		framework.ExpectNoError(
-			// generate traffic that will being encapsulated and sent to the external gateway.
+			// generate traffic that will being encapsulated and sent to the external gateway. Test
 			checkConnectivityPingToHost(f, ciWorkerNodeSrc, "external-gateway-e2e", extGW, ipv4PingCommand, 30))
 	})
 })

@@ -47,8 +47,11 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	if err := nsInfo.addressSet.AddIP(portInfo.ip); err != nil {
-		return err
+	//FIXME DUAL-STACK
+	if len(portInfo.ips) > 0 {
+		if err := nsInfo.addressSet.AddIP(portInfo.ips[0].IP); err != nil {
+			return err
+		}
 	}
 
 	// If multicast is allowed and enabled for the namespace, add the port
@@ -69,8 +72,11 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	if err := nsInfo.addressSet.DeleteIP(portInfo.ip); err != nil {
-		return err
+	//FIXME DUAL-STACK
+	if len(portInfo.ips) > 0 {
+		if err := nsInfo.addressSet.DeleteIP(portInfo.ips[0].IP); err != nil {
+			return err
+		}
 	}
 
 	// Remove the port from the multicast allow policy.
@@ -141,6 +147,7 @@ func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
 		nsInfo.portGroupUUID = portGroupUUID
 	} else {
 		deletePortGroup(hashedPortGroup(ns))
+		nsInfo.portGroupUUID = ""
 	}
 	return nil
 }
@@ -216,6 +223,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		} else {
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
+	} else {
+		nsInfo.hybridOverlayExternalGW = nil
 	}
 	annotation = newer.Annotations[hotypes.HybridOverlayVTEP]
 	if annotation != "" {
@@ -225,6 +234,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		} else {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
+	} else {
+		nsInfo.hybridOverlayVTEP = nil
 	}
 	oc.multicastUpdateNamespace(newer, nsInfo)
 }

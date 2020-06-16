@@ -94,7 +94,7 @@ const (
 	ipv6PingCommand pingCommand = "ping6"
 )
 
-// Place the workload on the specified node to test external connectivity
+// Place the workload on the specified node to test external connectivity via icmp
 func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host string, pingCmd pingCommand, timeout int) error {
 	contName := fmt.Sprintf("%s-container", podName)
 	// Ping options are:
